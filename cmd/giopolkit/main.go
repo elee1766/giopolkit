@@ -1,4 +1,4 @@
-// rootpls-agent is a polkit authentication agent with a readable confirmation window. It replaces
+// giopolkit is a polkit authentication agent with a readable confirmation window. It replaces
 // lxpolkit (or any other agent) for the current session.
 package main
 
@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/elee1766/rootpls/internal/agent"
-	"github.com/elee1766/rootpls/internal/ui"
+	"github.com/elee1766/giopolkit/internal/agent"
+	"github.com/elee1766/giopolkit/internal/ui"
 )
 
 func main() {
@@ -21,20 +21,20 @@ func main() {
 	if sid == "" {
 		var err error
 		if sid, err = agent.SessionID(); err != nil {
-			fmt.Fprintln(os.Stderr, "rootpls-agent:", err)
+			fmt.Fprintln(os.Stderr, "giopolkit:", err)
 			os.Exit(1)
 		}
 	}
 	a, err := agent.New(ui.New(), sid)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "rootpls-agent:", err)
+		fmt.Fprintln(os.Stderr, "giopolkit:", err)
 		os.Exit(1)
 	}
 	if err := a.Register(); err != nil {
-		fmt.Fprintf(os.Stderr, "rootpls-agent: register for session %s: %v\n(is another agent such as lxpolkit running?)\n", sid, err)
+		fmt.Fprintf(os.Stderr, "giopolkit: register for session %s: %v\n(is another agent such as lxpolkit running?)\n", sid, err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "rootpls-agent: registered for session %s\n", sid)
+	fmt.Fprintf(os.Stderr, "giopolkit: registered for session %s\n", sid)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

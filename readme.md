@@ -1,43 +1,60 @@
-# rootpls
+# giopolkit
 
-A way for agents to ask to run things as root.
+A polkit authentication agent with a readable approval window, built with [Gio](https://gioui.org).
+It replaces lxpolkit (or any other agent) in your session.
 
-`rootpls` shows a confirmation dialog with the agent's reason, a risk level, the exact command, and the working directory. If you approve, it hands off to polkit (`pkexec`), which asks for your password. The dialog is built with [Gio](https://gioui.org).
+When something asks polkit for authorization (usually `pkexec`), giopolkit shows:
 
-```bash
-rootpls -r "Install ripgrep the user asked for" -l medium -- apt-get install -y ripgrep
-rootpls -r "Read nginx logs" -l low -- 'journalctl -u nginx -n 50 --no-pager | tail'
+- **Run as root** (or the target user) in large text.
+- The **exact argv** pkexec will run, quoted so argument boundaries are visible, plus the working directory.
+- **Warnings**: the program or an argument can be modified by the requesting user, a relative
+  program name, or a shell or interpreter.
+- A red **"you can't see what this runs"** box when the command runs a script file (`sh fix.sh`,
+  `python3 x.py`, an executable script), since its contents aren't shown.
+- **Requested by**: the process chain that asked.
+
+You review it first. Deny is the big button and Esc denies. Approve is disabled for 1s after the window appears.
+After approval, the same window asks for your password (or shows "touch your key" for `pam_u2f`),
+using polkit's own setuid helper. Other polkit actions (NetworkManager, udisks, and so on) show the
+action, message, and details.
+
+## How it works
+
+```
+pkexec ──D-Bus──▶ polkitd ──BeginAuthentication(details, cookie)──▶ giopolkit (your session)
+                                                                     │ show request, wait for Approve
+                                                                     │ run polkit-agent-helper-1 (setuid, PAM)
+                     ◀── helper reports success to polkitd ──────────┘
+pkexec runs the command
 ```
 
-- One argument after `--` runs via `/bin/sh -c`. Several arguments run directly (no shell).
-- `-l low|medium|high` sets the badge color. `-t 120s` sets the auto-deny timeout.
-- `--dialog-only` shows the dialog and exits 0 on approval without running anything.
-- Exit codes: `0` ok, `126` denied, timed out, or auth failed, `2` usage error, anything else is the command's own exit code.
-- Keys: `Esc` denies, `Ctrl+Enter` approves. Approval is disabled for the first 800ms so a stray keypress or click can't approve.
-- On X11 the dialog is centered on the primary monitor and kept on top.
+polkitd sends agents only the action, message, and `polkit.subject-pid` / `polkit.caller-pid`.
+For pkexec, the caller is the pkexec process itself. giopolkit reads its argv from
+`/proc/PID/cmdline`, and only trusts it if the process is named `pkexec` and runs with euid 0.
+A same-user process can't ptrace or modify a setuid process, so that argv is what pkexec runs.
 
-## Security model
-
-Root access is protected by polkit authentication. The dialog does not protect anything.
-
-1. `rootpls` runs as your user, the same user as the agent. Anything it can do, the agent can do directly. That includes calling `pkexec` itself or sending synthetic X11 key events to approve the dialog (`xdotool` can do this on X11). The dialog is there to show you what is about to run and why. It is not a security boundary.
-2. The real boundary is `pkexec`. It is setuid root. It asks `polkitd` over the system D-Bus whether the caller is authorized for `org.freedesktop.policykit.exec`. On this system that action is `auth_admin` with no `_keep`, so polkitd makes the session's auth agent (lxpolkit) ask for your password every time, and nothing is cached. The agent never sees the password.
-3. Hardening in rootpls:
-   - `pkexec` is resolved from fixed absolute paths and must be setuid, so a `pkexec` earlier on a PATH the agent controls is not used.
-   - `--disable-internal-agent` stops pkexec from falling back to a text password prompt on the agent's terminal.
-   - pkexec clears the environment, so `LD_PRELOAD`, `PATH`, and similar variables from the agent do not reach the root process. The command runs as `/usr/bin/env -C <cwd> /bin/sh -c ...`.
-   - stdin is `/dev/null`. Any failure (window can't open, timeout, Esc, close) counts as a denial.
-4. Limits:
-   - Read the command in the dialog. A command you approve can do anything, including installing a persistent backdoor.
-   - The polkit prompt shows `/usr/bin/env`, not the full command. The rootpls dialog is where you check the command.
-   - Wayland stops other clients from injecting input. X11 does not. Under X11, treat the dialog as informational only.
-
-## Build
-
-Needs Go and the Gio Linux dependencies (`libwayland-dev libx11-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libxcursor-dev libxfixes-dev libxrandr-dev libvulkan-dev`).
+## Install
 
 ```bash
-go build -trimpath -ldflags='-s -w' -o ~/.local/bin/rootpls .
+go build -o ~/.local/bin/giopolkit ./cmd/giopolkit
 ```
 
-Elevation is implemented for Linux and the BSDs. Other platforms support `--dialog-only` only.
+Start it in your session instead of lxpolkit. Only one agent can register per session.
+
+- nitro: `dist/nitro/giopolkit/run` (copy to `~/.config/nitro/giopolkit/`, remove the lxpolkit service, `nitroctl rescan`).
+- Other setups: run `giopolkit` from your session startup, after removing `lxpolkit` from autostart.
+
+`giopolkit -session ID` overrides the logind session (default `XDG_SESSION_ID` or detected).
+
+## Security notes
+
+- The real check is unchanged: `polkit-agent-helper-1` runs PAM and tells polkitd the result. giopolkit
+  only relays prompts. Passwords go to the helper on a pipe and are not kept.
+- giopolkit only accepts `BeginAuthentication` and `CancelAuthentication` from the owner of
+  `org.freedesktop.PolicyKit1`, so other processes can't make it show fake requests.
+- Text is escaped before display: control characters, bidi overrides, zero-width and non-ASCII
+  characters show as `\u{...}`.
+- What it can't do: if the agent requesting root runs as your own user, it can also send synthetic
+  input to your X11 session or read your keystrokes. The password (or a `pam_u2f` key touch) is what
+  stops it, not the window. Wayland, `kernel.yama.ptrace_scope=2`, and `pam_u2f` close most of that gap.
+- A command you approve can do anything root can. Read it.

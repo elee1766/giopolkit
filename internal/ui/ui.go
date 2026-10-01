@@ -10,8 +10,8 @@ import (
 
 	"gioui.org/app"
 
-	"github.com/elee1766/rootpls/internal/agent"
-	"github.com/elee1766/rootpls/internal/inspect"
+	"github.com/elee1766/giopolkit/internal/agent"
+	"github.com/elee1766/giopolkit/internal/inspect"
 )
 
 var ErrDenied = errors.New("denied by user")

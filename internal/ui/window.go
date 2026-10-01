@@ -24,7 +24,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/elee1766/rootpls/internal/place"
+	"github.com/elee1766/giopolkit/internal/place"
 )
 
 // armDelay disables Approve after the window appears so a click or keypress meant for another
@@ -278,6 +278,17 @@ func (v *view_) layout(gtx layout.Context) layout.Dimensions {
 			}
 			add(spacer(12))
 		}
+	}
+	if rep.Opaque != "" {
+		add(func(gtx layout.Context) layout.Dimensions {
+			return panel(gtx, colErr, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(v.label("YOU CAN'T SEE WHAT THIS RUNS", 12, colErr, true)),
+					layout.Rigid(spacer(4)),
+					layout.Rigid(v.label(Escape(rep.Opaque), 14, colFg, false)),
+				)
+			})
+		}, spacer(12))
 	}
 	if len(rep.Warnings) > 0 {
 		add(v.label("WARNINGS", 11, colWarn, true), spacer(4))

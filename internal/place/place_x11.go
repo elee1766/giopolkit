@@ -10,7 +10,7 @@ package place
 #include <string.h>
 
 // Moves win to the center of the primary RandR monitor and marks it as an always-on-top dialog.
-static void rootpls_place(Display *d, Window win, int w, int h) {
+static void giopolkit_place(Display *d, Window win, int w, int h) {
 	int n = 0, mx = 0, my = 0, mw = 0, mh = 0;
 	XRRMonitorInfo *mons = XRRGetMonitors(d, DefaultRootWindow(d), True, &n);
 	for (int i = 0; i < n; i++) {
@@ -64,6 +64,6 @@ func Window(e event.Event, w, h int) bool {
 	if !ok || v.Display == nil || v.Window == 0 {
 		return false
 	}
-	C.rootpls_place((*C.Display)(unsafe.Pointer(v.Display)), C.Window(v.Window), C.int(w), C.int(h))
+	C.giopolkit_place((*C.Display)(unsafe.Pointer(v.Display)), C.Window(v.Window), C.int(w), C.int(h))
 	return true
 }

@@ -50,3 +50,22 @@ func TestPathCandidates(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestScriptFile(t *testing.T) {
+	cases := map[string][]string{
+		"check.sh": {"/bin/sh", "check.sh"},
+		"x.py":     {"/usr/bin/python3", "-u", "x.py"},
+		"":         {"/bin/sh", "-c", "id"},
+		" ":        {"/bin/bash", "-ec", "id"},
+		"  ":       {"/usr/bin/python3", "-c", "print(1)"},
+		"   ":      {"/bin/sh"},
+	}
+	for want, argv := range cases {
+		if want != "check.sh" && want != "x.py" {
+			want = ""
+		}
+		if got := scriptFile(argv); got != want {
+			t.Errorf("scriptFile(%q) = %q, want %q", argv, got, want)
+		}
+	}
+}

@@ -29,6 +29,8 @@ type Report struct {
 	Trusted    bool     // Argv was read from a setuid pkexec process, which the caller can't alter
 	Chain      []Proc   // the requester and its parents, pkexec excluded
 	Warnings   []string // things the approver should know
+	// Opaque is set when the command runs code the approver can't see (a script file).
+	Opaque string
 }
 
 // Build inspects a request. polkitd forwards only polkit.subject-pid and polkit.caller-pid to
@@ -80,7 +82,13 @@ func Build(actionID string, details map[string]string) Report {
 		}
 	}
 	if isShellOrInterp(filepath.Base(r.Program)) {
-		r.Warnings = append(r.Warnings, filepath.Base(r.Program)+" runs code from its arguments or from files: read them carefully")
+		if f := scriptFile(r.Argv); f != "" {
+			r.Opaque = fmt.Sprintf("%s runs the file %s. Its contents are not shown here, so you can't see what will run. Ask for the actual commands instead.", filepath.Base(r.Program), f)
+		} else {
+			r.Warnings = append(r.Warnings, filepath.Base(r.Program)+" runs code from its arguments: read them carefully")
+		}
+	} else if isScript(r.Program) {
+		r.Opaque = r.Program + " is a script. Its contents are not shown here, so you can't see what will run."
 	}
 	return r
 }
@@ -153,6 +161,36 @@ func pathCandidates(a, cwd string) []string {
 		}
 	}
 	return out
+}
+
+// scriptFile returns the file an interpreter will run, or "" when the code is inline (-c, -e)
+// or there is no file argument. Interpreter options before the file are skipped.
+func scriptFile(argv []string) string {
+	for _, a := range argv[1:] {
+		switch a {
+		case "-c", "-e", "-E", "--command", "--eval", "-C":
+			return ""
+		}
+		if strings.HasPrefix(a, "-") {
+			if !strings.HasPrefix(a, "--") && strings.ContainsAny(a[1:], "ce") {
+				return "" // combined short flags like -ec or -xc
+			}
+			continue
+		}
+		return a
+	}
+	return ""
+}
+
+func isScript(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 2)
+	n, _ := f.Read(head)
+	return n == 2 && string(head) == "#!"
 }
 
 func isShellOrInterp(b string) bool {

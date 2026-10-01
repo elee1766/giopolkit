@@ -20,7 +20,7 @@ const (
 	authorityPath  = "/org/freedesktop/PolicyKit1/Authority"
 	authorityIface = "org.freedesktop.PolicyKit1.Authority"
 	agentIface     = "org.freedesktop.PolicyKit1.AuthenticationAgent"
-	ObjectPath     = dbus.ObjectPath("/io/github/elee1766/rootpls/AuthenticationAgent")
+	ObjectPath     = dbus.ObjectPath("/io/github/elee1766/giopolkit/AuthenticationAgent")
 )
 
 // Identity is a user polkit will accept authentication for.

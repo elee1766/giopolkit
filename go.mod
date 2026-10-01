@@ -1,4 +1,4 @@
-module github.com/elee1766/rootpls
+module github.com/elee1766/giopolkit
 
 go 1.27.1
 
