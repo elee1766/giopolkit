@@ -1,6 +1,6 @@
 //go:build linux && !nox11
 
-package main
+package place
 
 /*
 #cgo LDFLAGS: -lX11 -lXrandr
@@ -59,7 +59,7 @@ import (
 )
 
 // placeWindow centers an X11 window on the primary monitor. Other platforms are left to the window manager.
-func placeWindow(e event.Event, w, h int) bool {
+func Window(e event.Event, w, h int) bool {
 	v, ok := e.(app.X11ViewEvent)
 	if !ok || v.Display == nil || v.Window == 0 {
 		return false
