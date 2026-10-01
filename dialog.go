@@ -194,11 +194,18 @@ func dialog(req request) bool {
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								b := material.Button(th, &deny, "Deny")
 								b.Background = colDeny
+								b.TextSize = 16
+								b.Font.Weight = font.Bold
+								b.CornerRadius = 6
+								b.Inset = layout.Inset{Top: 14, Bottom: 14, Left: 40, Right: 40}
+								gtx.Constraints.Min.X = gtx.Dp(150)
 								return b.Layout(gtx)
 							}),
-							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								b := material.Button(th, &approve, "Approve & authenticate")
+								b := material.Button(th, &approve, "Approve")
+								b.TextSize = 12
+								b.Inset = layout.Inset{Top: 6, Bottom: 6, Left: 10, Right: 10}
 								if !armed {
 									gtx = gtx.Disabled()
 								}
