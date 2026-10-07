@@ -10,8 +10,9 @@ import (
 
 	"gioui.org/app"
 
-	"github.com/elee1766/giopolkit/internal/agent"
-	"github.com/elee1766/giopolkit/internal/inspect"
+	"github.com/elee1766/giopolkit/pkg/agent"
+	"github.com/elee1766/giopolkit/pkg/inspect"
+	"github.com/elee1766/giopolkit/pkg/theme"
 )
 
 var ErrDenied = errors.New("denied by user")
@@ -55,9 +56,10 @@ func (s *session) update(f func()) {
 // UI implements agent.UI. Requests are shown one at a time in the order they arrive.
 type UI struct {
 	queue sync.Mutex
+	pal   theme.Palette
 }
 
-func New() *UI { return &UI{} }
+func New(pal theme.Palette) *UI { return &UI{pal: pal} }
 
 // Run starts the Gio main loop. It must be called from main and never returns.
 func Run() { app.Main() }
@@ -81,7 +83,7 @@ func (u *UI) Handle(r *agent.Request, auth agent.Authenticator) error {
 	defer cancel()
 	closed := make(chan struct{})
 	go func() {
-		show(ctx, s)
+		show(ctx, s, u.pal)
 		close(closed)
 		cancel()
 	}()

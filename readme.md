@@ -5,15 +5,16 @@ It replaces lxpolkit (or any other agent) in your session.
 
 When something asks polkit for authorization (usually `pkexec`), giopolkit shows:
 
-- **Run as root** (or the target user) in large text.
+- **run as root** (or the target user).
 - The **exact argv** pkexec will run, quoted so argument boundaries are visible, plus the working directory.
-- **Warnings**: the program or an argument can be modified by the requesting user, a relative
-  program name, or a shell or interpreter.
-- A red **"you can't see what this runs"** box when the command runs a script file (`sh fix.sh`,
-  `python3 x.py`, an executable script), since its contents aren't shown.
-- **Requested by**: the process chain that asked.
+- **Warnings** (`!!` lines): the program or an argument can be modified by the requesting user, a
+  relative program name, a shell or interpreter, or a script file whose contents aren't shown
+  (`sh fix.sh`, `python3 x.py`, an executable script). The argument a warning is about is
+  highlighted in the command. A flagged request gets a red border and the rule name in the header.
+- **from**: the process chain that asked.
 
-You review it first. Deny is the big button and Esc denies. Approve is disabled for 1s after the window appears.
+You review it first. Deny is the filled button and Esc denies. Approve is disabled for 1s after the
+window appears, or 3s if anything was flagged.
 After approval, the same window asks for your password (or shows "touch your key" for `pam_u2f`),
 using polkit's own setuid helper. Other polkit actions (NetworkManager, udisks, and so on) show the
 action, message, and details.
@@ -45,6 +46,21 @@ Start it in your session instead of lxpolkit. Only one agent can register per se
 - Other setups: run `giopolkit` from your session startup, after removing `lxpolkit` from autostart.
 
 `giopolkit -session ID` overrides the logind session (default `XDG_SESSION_ID` or detected).
+
+## Colors
+
+Colors come from `$XDG_CONFIG_HOME/giopolkit/config.yaml` (`-config` to change). See
+[`dist/config.yaml`](dist/config.yaml) for every option.
+
+```yaml
+xresources: true      # take colors from xrdb: background, foreground, color0/1/2/8
+colors:
+  red: "#ff5555"      # then override single colors
+```
+
+With `xresources: true`, `giopolkit.red` (and the other names) are used if set, then the
+terminal colors. `xresources_file: ~/.Xresources` reads a file instead of running `xrdb`.
+Config errors are printed and the remaining colors still apply.
 
 ## Security notes
 

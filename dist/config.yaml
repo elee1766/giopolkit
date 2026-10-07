@@ -1,0 +1,25 @@
+# Copy to $XDG_CONFIG_HOME/giopolkit/config.yaml (default ~/.config/giopolkit/config.yaml).
+# Every key is optional. Colors are #rgb, #rrggbb, #rrggbbaa, or rgb:rr/gg/bb.
+
+# Load colors from Xresources (xrdb -query). giopolkit.<name> resources are used first,
+# then the resources in xresources_keys.
+xresources: false
+# Read this file instead of running xrdb. Setting it turns on xresources.
+# xresources_file: ~/.Xresources
+# Which resource feeds each color. These are the defaults.
+# xresources_keys:
+#   bg: background
+#   fg: foreground
+#   dim: color8
+#   line: color0
+#   red: color1
+#   green: color2
+
+# Overrides, applied after Xresources. These are the defaults.
+colors:
+  # bg: "#121212"     # window background
+  # fg: "#d4d4d4"     # text, deny button
+  # dim: "#8a8a8a"    # labels, pids, disabled approve
+  # line: "#333333"   # border of requests with no warnings
+  # red: "#e06c75"    # warnings, root, highlighted arguments, flagged border
+  # green: "#98c379"  # non-root target user, success

@@ -22,15 +22,24 @@ type Proc struct {
 }
 
 type Report struct {
-	Program    string   // program pkexec will run, if this is a pkexec request
-	Argv       []string // exact argv pkexec will run
-	TargetUser string   // pkexec --user, default root
-	Cwd        string   // working directory of the command, best effort
-	Trusted    bool     // Argv was read from a setuid pkexec process, which the caller can't alter
-	Chain      []Proc   // the requester and its parents, pkexec excluded
-	Warnings   []string // things the approver should know
-	// Opaque is set when the command runs code the approver can't see (a script file).
-	Opaque string
+	Program    string    // program pkexec will run, if this is a pkexec request
+	Argv       []string  // exact argv pkexec will run
+	TargetUser string    // pkexec --user, default root
+	Cwd        string    // working directory of the command, best effort
+	Trusted    bool      // Argv was read from a setuid pkexec process, which the caller can't alter
+	Chain      []Proc    // the requester and its parents, pkexec excluded
+	Warnings   []Warning // things the approver should know
+}
+
+// Warning is one flagged property of a request.
+type Warning struct {
+	Rule string // short identifier shown in the window header
+	Text string
+	Arg  int // index into Argv this is about, or -1
+}
+
+func (r *Report) warn(rule string, arg int, format string, a ...any) {
+	r.Warnings = append(r.Warnings, Warning{Rule: rule, Text: fmt.Sprintf(format, a...), Arg: arg})
 }
 
 // Build inspects a request. polkitd forwards only polkit.subject-pid and polkit.caller-pid to
@@ -68,7 +77,7 @@ func Build(actionID string, details map[string]string) Report {
 	}
 	groups := groupsOf(req.PID)
 	if mod, via := CanModify(r.Program, req.UID, groups); mod {
-		r.Warnings = append(r.Warnings, fmt.Sprintf("%s can be modified by the requesting user (via %s): it could be replaced after you approve", r.Program, via))
+		r.warn("writable-program", 0, "%s can be modified by the requesting user (via %s): it could be replaced after you approve", r.Program, via)
 	}
 	for i, a := range r.Argv {
 		if i == 0 {
@@ -76,19 +85,19 @@ func Build(actionID string, details map[string]string) Report {
 		}
 		for _, c := range pathCandidates(a, r.Cwd) {
 			if mod, via := CanModify(c, req.UID, groups); mod {
-				r.Warnings = append(r.Warnings, fmt.Sprintf("argument %d (%s) can be modified by the requesting user (via %s)", i, c, via))
+				r.warn("writable-arg", i, "argument %d (%s) can be modified by the requesting user (via %s)", i, c, via)
 				break
 			}
 		}
 	}
 	if isShellOrInterp(filepath.Base(r.Program)) {
-		if f := scriptFile(r.Argv); f != "" {
-			r.Opaque = fmt.Sprintf("%s runs the file %s. Its contents are not shown here, so you can't see what will run. Ask for the actual commands instead.", filepath.Base(r.Program), f)
+		if i := scriptFile(r.Argv); i > 0 {
+			r.warn("script-file", i, "%s runs the file %s: its contents are not shown, so you can't see what will run", filepath.Base(r.Program), r.Argv[i])
 		} else {
-			r.Warnings = append(r.Warnings, filepath.Base(r.Program)+" runs code from its arguments: read them carefully")
+			r.warn("interpreter", -1, "%s runs code from its arguments: read them carefully", filepath.Base(r.Program))
 		}
 	} else if isScript(r.Program) {
-		r.Opaque = r.Program + " is a script. Its contents are not shown here, so you can't see what will run."
+		r.warn("script-program", 0, "%s is a script: its contents are not shown, so you can't see what will run", r.Program)
 	}
 	return r
 }
@@ -99,7 +108,7 @@ func readPkexec(r *Report, pid int) bool {
 	dir := "/proc/" + strconv.Itoa(pid)
 	comm, _ := os.ReadFile(dir + "/comm")
 	if strings.TrimSpace(string(comm)) != "pkexec" || euid(pid) != 0 {
-		r.Warnings = append(r.Warnings, "the requesting process is not a setuid pkexec: the command can't be verified")
+		r.warn("unverified-caller", -1, "the requesting process is not a setuid pkexec: the command can't be verified")
 		return false
 	}
 	b, err := os.ReadFile(dir + "/cmdline")
@@ -133,7 +142,7 @@ loop:
 	r.Argv = args[i:]
 	r.Program = args[i]
 	if !strings.HasPrefix(r.Program, "/") {
-		r.Warnings = append(r.Warnings, "relative program name: pkexec looks it up in the caller's PATH, which the caller controls")
+		r.warn("relative-program", 0, "relative program name: pkexec looks it up in the caller's PATH, which the caller controls")
 	}
 	if !keepCwd {
 		r.Cwd = "(home of " + user + ")"
@@ -163,23 +172,24 @@ func pathCandidates(a, cwd string) []string {
 	return out
 }
 
-// scriptFile returns the file an interpreter will run, or "" when the code is inline (-c, -e)
-// or there is no file argument. Interpreter options before the file are skipped.
-func scriptFile(argv []string) string {
-	for _, a := range argv[1:] {
+// scriptFile returns the index of the file an interpreter will run, or 0 when the code is inline
+// (-c, -e) or there is no file argument. Interpreter options before the file are skipped.
+func scriptFile(argv []string) int {
+	for i := 1; i < len(argv); i++ {
+		a := argv[i]
 		switch a {
 		case "-c", "-e", "-E", "--command", "--eval", "-C":
-			return ""
+			return 0
 		}
 		if strings.HasPrefix(a, "-") {
 			if !strings.HasPrefix(a, "--") && strings.ContainsAny(a[1:], "ce") {
-				return "" // combined short flags like -ec or -xc
+				return 0 // combined short flags like -ec or -xc
 			}
 			continue
 		}
-		return a
+		return i
 	}
-	return ""
+	return 0
 }
 
 func isScript(path string) bool {

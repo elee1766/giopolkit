@@ -64,7 +64,11 @@ func TestScriptFile(t *testing.T) {
 		if want != "check.sh" && want != "x.py" {
 			want = ""
 		}
-		if got := scriptFile(argv); got != want {
+		got := ""
+		if i := scriptFile(argv); i > 0 {
+			got = argv[i]
+		}
+		if got != want {
 			t.Errorf("scriptFile(%q) = %q, want %q", argv, got, want)
 		}
 	}
