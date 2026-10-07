@@ -14,7 +14,7 @@ func TestXresourcesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := Default()
-	if err := (Config{XresourcesFile: f, Colors: map[string]string{"fg": "#abc"}}).Apply(&p); err != nil {
+	if err := (Colors{XresourcesFile: f, Override: map[string]string{"fg": "#abc"}}).Apply(&p); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]color.NRGBA{
@@ -29,7 +29,7 @@ func TestXresourcesFile(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, got, c)
 		}
 	}
-	if err := (Config{Colors: map[string]string{"red": "red", "x": "#fff"}}).Apply(&p); err == nil || !strings.Contains(err.Error(), `"x"`) {
+	if err := (Colors{Override: map[string]string{"red": "red", "x": "#fff"}}).Apply(&p); err == nil || !strings.Contains(err.Error(), `"x"`) {
 		t.Errorf("bad config error = %v", err)
 	}
 }

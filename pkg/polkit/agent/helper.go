@@ -78,16 +78,9 @@ func runHelper(ctx context.Context, id Identity, cookie string, conv Conversatio
 	if _, err := io.WriteString(stdin, cookie+"\n"); err != nil {
 		return err
 	}
-	rd := bufio.NewReader(stdout)
-	for {
-		line, err := rd.ReadString('\n')
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return ErrAuthFailed
-		}
-		line = unescape(strings.TrimSuffix(line, "\n"))
+	sc := bufio.NewScanner(stdout)
+	for sc.Scan() {
+		line := unescape(sc.Text())
 		kind, text, ok := parseLine(line)
 		switch {
 		case line == "SUCCESS" || strings.HasPrefix(line, "SUCCESS "):
@@ -114,18 +107,23 @@ func runHelper(ctx context.Context, id Identity, cookie string, conv Conversatio
 			}
 		}
 	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return ErrAuthFailed
 }
 
 func parseLine(line string) (PromptKind, string, bool) {
-	for prefix, k := range map[string]PromptKind{
-		"PAM_PROMPT_ECHO_OFF ": PromptSecret,
-		"PAM_PROMPT_ECHO_ON ":  PromptText,
-		"PAM_TEXT_INFO ":       InfoText,
-		"PAM_ERROR_MSG ":       ErrorText,
-	} {
-		if strings.HasPrefix(line, prefix) {
-			return k, strings.TrimPrefix(line, prefix), true
-		}
+	tag, text, _ := strings.Cut(line, " ")
+	switch tag {
+	case "PAM_PROMPT_ECHO_OFF":
+		return PromptSecret, text, true
+	case "PAM_PROMPT_ECHO_ON":
+		return PromptText, text, true
+	case "PAM_TEXT_INFO":
+		return InfoText, text, true
+	case "PAM_ERROR_MSG":
+		return ErrorText, text, true
 	}
 	return 0, "", false
 }

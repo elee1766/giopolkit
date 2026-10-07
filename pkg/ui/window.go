@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"os"
+	"maps"
 	"os/user"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,8 +28,8 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/elee1766/giopolkit/pkg/place"
-	"github.com/elee1766/giopolkit/pkg/theme"
+	"github.com/elee1766/giopolkit/pkg/ui/place"
+	"github.com/elee1766/giopolkit/pkg/ui/theme"
 )
 
 // armDelay disables Approve after the window appears so a click or keypress meant for another
@@ -45,8 +45,6 @@ const (
 	lineScale          = 1.6
 	labelWidth unit.Dp = 64
 )
-
-func myUID() int { return os.Getuid() }
 
 func show(ctx context.Context, s *session, pal theme.Palette) {
 	w := new(app.Window)
@@ -287,13 +285,10 @@ func (v *view_) header(gtx layout.Context) layout.Dimensions {
 		c = v.pal.Red
 		left = "polkit · flagged"
 		var rules []string
-		seen := map[string]bool{}
 		for _, w := range rep.Warnings {
-			if !seen[w.Rule] {
-				seen[w.Rule] = true
-				rules = append(rules, w.Rule)
-			}
+			rules = append(rules, w.Rule)
 		}
+		rules = slices.Compact(rules) // findings from one rule are adjacent
 		right = "rule " + rules[0]
 		if len(rules) > 1 {
 			right += fmt.Sprintf(" +%d", len(rules)-1)
@@ -366,14 +361,10 @@ func (v *view_) body(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(v.row("action", v.pal.Dim, v.text(Escape(r.ActionID), v.pal.Fg, true), nil)),
 			layout.Rigid(v.row("msg", v.pal.Dim, v.text(Escape(r.Message), v.pal.Fg, false), nil)),
 		)
-		var keys []string
-		for k := range r.Details {
-			if !strings.HasPrefix(k, "polkit.") {
-				keys = append(keys, k)
+		for _, k := range slices.Sorted(maps.Keys(r.Details)) {
+			if strings.HasPrefix(k, "polkit.") {
+				continue
 			}
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
 			facts = append(facts, layout.Rigid(v.row("detail", v.pal.Dim, v.text(Escape(k)+" = "+Escape(r.Details[k]), v.pal.Fg, false), nil)))
 		}
 	}

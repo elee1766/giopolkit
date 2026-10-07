@@ -29,6 +29,21 @@ type Identity struct {
 	Name string
 }
 
+// PickIdentity prefers uid, then any non-root user, then the first identity.
+func PickIdentity(ids []Identity, uid uint32) Identity {
+	for _, id := range ids {
+		if id.UID == uid {
+			return id
+		}
+	}
+	for _, id := range ids {
+		if id.UID != 0 {
+			return id
+		}
+	}
+	return ids[0]
+}
+
 // Request is one BeginAuthentication call.
 type Request struct {
 	ActionID   string

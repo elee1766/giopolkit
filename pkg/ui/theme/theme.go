@@ -1,23 +1,15 @@
-// Package theme holds the window palette and loads overrides from
-// $XDG_CONFIG_HOME/giopolkit/config.yaml and, optionally, Xresources.
+// Package theme holds the window palette and applies color overrides from config and Xresources.
 package theme
 
 import (
-	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"image/color"
-	"io"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"maps"
 	"strconv"
 	"strings"
-	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/elee1766/giopolkit/pkg/sys/xresources"
 )
 
 // Palette is the set of colors the window uses.
@@ -73,59 +65,27 @@ func (p *Palette) field(name string) *color.NRGBA {
 	return nil
 }
 
-// Config is the YAML config file.
-type Config struct {
+// Colors is the color section of the config file.
+type Colors struct {
 	// Xresources loads colors from the X resource database (xrdb -query) when true.
 	Xresources bool `yaml:"xresources"`
 	// XresourcesFile reads resources from this file instead of xrdb. Implies Xresources.
 	XresourcesFile string `yaml:"xresources_file"`
 	// XresourcesKeys overrides which resource feeds each palette key, e.g. {dim: color7}.
 	XresourcesKeys map[string]string `yaml:"xresources_keys"`
-	// Colors overrides palette keys. Applied after Xresources.
-	Colors map[string]string `yaml:"colors"`
-}
-
-// Path returns the config file location.
-func Path() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "giopolkit", "config.yaml")
-}
-
-// Load builds the palette: defaults, then Xresources if enabled, then config colors.
-// A missing config file is not an error. Other errors are returned with the best palette
-// that could be built.
-func Load(path string) (Palette, error) {
-	p := Default()
-	b, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return p, nil
-	}
-	if err != nil {
-		return p, err
-	}
-	var c Config
-	if err := yaml.Unmarshal(b, &c); err != nil {
-		return p, fmt.Errorf("%s: %w", path, err)
-	}
-	return p, c.Apply(&p)
+	// Override sets palette keys. Applied after Xresources.
+	Override map[string]string `yaml:"colors"`
 }
 
 // Apply applies c to p. Bad entries are skipped and reported together.
-func (c Config) Apply(p *Palette) error {
+func (c Colors) Apply(p *Palette) error {
 	var errs []error
 	if c.Xresources || c.XresourcesFile != "" {
-		res, err := readResources(c.XresourcesFile)
+		res, err := xresources.Load(c.XresourcesFile)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("xresources: %w", err))
 		}
-		keys := map[string]string{}
-		for k, v := range DefaultXresourcesKeys {
-			keys[k] = v
-		}
+		keys := maps.Clone(DefaultXresourcesKeys)
 		for k, v := range c.XresourcesKeys {
 			if p.field(k) == nil {
 				errs = append(errs, fmt.Errorf("xresources_keys: unknown color %q", k))
@@ -149,7 +109,7 @@ func (c Config) Apply(p *Palette) error {
 			*p.field(k) = col
 		}
 	}
-	for k, v := range c.Colors {
+	for k, v := range c.Override {
 		f := p.field(k)
 		if f == nil {
 			errs = append(errs, fmt.Errorf("colors: unknown color %q", k))
@@ -163,57 +123,6 @@ func (c Config) Apply(p *Palette) error {
 		*f = col
 	}
 	return errors.Join(errs...)
-}
-
-func readResources(file string) (map[string]string, error) {
-	if file != "" {
-		if strings.HasPrefix(file, "~/") {
-			home, _ := os.UserHomeDir()
-			file = filepath.Join(home, file[2:])
-		}
-		f, err := os.Open(file)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		return ParseResources(f), nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "xrdb", "-query").Output()
-	if err != nil {
-		return nil, fmt.Errorf("xrdb -query: %w", err)
-	}
-	return ParseResources(strings.NewReader(string(out))), nil
-}
-
-// ParseResources reads "name: value" lines. Wildcard entries (*.color1, *color1) are stored under
-// the bare name, giopolkit.x and giopolkit*x under "giopolkit.x". Entries for other applications
-// are ignored.
-func ParseResources(r io.Reader) map[string]string {
-	out := map[string]string{}
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || line[0] == '!' || line[0] == '#' {
-			continue
-		}
-		name, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		name, val = strings.TrimSpace(name), strings.TrimSpace(val)
-		switch {
-		case strings.HasPrefix(name, "*"):
-			name = strings.TrimLeft(name, "*.")
-		case strings.HasPrefix(name, "giopolkit.") || strings.HasPrefix(name, "giopolkit*"):
-			name = "giopolkit." + strings.TrimLeft(name[len("giopolkit"):], "*.")
-		default:
-			continue
-		}
-		out[name] = val
-	}
-	return out
 }
 
 // ParseColor accepts #rgb, #rrggbb, #rrggbbaa, and X11 rgb:r/g/b with 1 to 4 hex digits per channel.

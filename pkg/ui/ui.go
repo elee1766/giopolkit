@@ -5,14 +5,16 @@ package ui
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"time"
 
 	"gioui.org/app"
 
-	"github.com/elee1766/giopolkit/pkg/agent"
-	"github.com/elee1766/giopolkit/pkg/inspect"
-	"github.com/elee1766/giopolkit/pkg/theme"
+	"github.com/elee1766/giopolkit/pkg/polkit/agent"
+	"github.com/elee1766/giopolkit/pkg/polkit/pkexec"
+	"github.com/elee1766/giopolkit/pkg/rules"
+	"github.com/elee1766/giopolkit/pkg/ui/theme"
 )
 
 var ErrDenied = errors.New("denied by user")
@@ -29,7 +31,7 @@ const (
 // session is the state shared between the agent goroutine (running PAM) and the window.
 type session struct {
 	req    *agent.Request
-	report inspect.Report
+	report pkexec.Report
 
 	mu       sync.Mutex
 	stage    stage
@@ -56,10 +58,16 @@ func (s *session) update(f func()) {
 // UI implements agent.UI. Requests are shown one at a time in the order they arrive.
 type UI struct {
 	queue sync.Mutex
-	pal   theme.Palette
+	opts  Options
 }
 
-func New(pal theme.Palette) *UI { return &UI{pal: pal} }
+// Options configure the window.
+type Options struct {
+	Palette theme.Palette
+	Rules   []rules.Rule // checks run on pkexec commands
+}
+
+func New(opts Options) *UI { return &UI{opts: opts} }
 
 // Run starts the Gio main loop. It must be called from main and never returns.
 func Run() { app.Main() }
@@ -75,7 +83,7 @@ func (u *UI) Handle(r *agent.Request, auth agent.Authenticator) error {
 	}
 	s := &session{
 		req:      r,
-		report:   inspect.Build(r.ActionID, r.Details),
+		report:   pkexec.Build(r.ActionID, r.Details, u.opts.Rules),
 		answer:   make(chan string),
 		decision: make(chan bool, 1),
 	}
@@ -83,7 +91,7 @@ func (u *UI) Handle(r *agent.Request, auth agent.Authenticator) error {
 	defer cancel()
 	closed := make(chan struct{})
 	go func() {
-		show(ctx, s, u.pal)
+		show(ctx, s, u.opts.Palette)
 		close(closed)
 		cancel()
 	}()
@@ -98,7 +106,7 @@ func (u *UI) Handle(r *agent.Request, auth agent.Authenticator) error {
 		return ctx.Err()
 	}
 
-	id := pickIdentity(r.Identities)
+	id := agent.PickIdentity(r.Identities, uint32(os.Getuid()))
 	s.update(func() { s.stage = stAuth })
 	var err error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -133,20 +141,4 @@ func (u *UI) Handle(r *agent.Request, auth agent.Authenticator) error {
 		s.update(func() { s.errMsg, s.waiting, s.info = "Authentication failed. Try again.", false, nil })
 	}
 	return err
-}
-
-// pickIdentity prefers the current user, then any non-root user, then root.
-func pickIdentity(ids []agent.Identity) agent.Identity {
-	me := uint32(myUID())
-	for _, id := range ids {
-		if id.UID == me {
-			return id
-		}
-	}
-	for _, id := range ids {
-		if id.UID != 0 {
-			return id
-		}
-	}
-	return ids[0]
 }

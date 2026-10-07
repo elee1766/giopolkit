@@ -9,19 +9,24 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/elee1766/giopolkit/pkg/agent"
-	"github.com/elee1766/giopolkit/pkg/theme"
+	"github.com/elee1766/giopolkit/pkg/config"
+	"github.com/elee1766/giopolkit/pkg/polkit/agent"
+	"github.com/elee1766/giopolkit/pkg/rules/staticrules"
 	"github.com/elee1766/giopolkit/pkg/ui"
 )
 
 func main() {
 	session := flag.String("session", "", "logind session id (default: XDG_SESSION_ID or detected)")
-	config := flag.String("config", theme.Path(), "config file")
+	configPath := flag.String("config", config.Path(), "config file")
 	flag.Parse()
 
-	pal, err := theme.Load(*config)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "giopolkit: config:", err)
+	}
+	pal, err := cfg.Palette()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "giopolkit: colors:", err)
 	}
 
 	sid := *session
@@ -32,7 +37,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	a, err := agent.New(ui.New(pal), sid)
+	a, err := agent.New(ui.New(ui.Options{Palette: pal, Rules: staticrules.Default()}), sid)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "giopolkit:", err)
 		os.Exit(1)
