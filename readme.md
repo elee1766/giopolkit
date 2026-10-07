@@ -6,12 +6,15 @@ It replaces lxpolkit (or any other agent) in your session.
 When something asks polkit for authorization (usually `pkexec`), giopolkit shows:
 
 - **run as root** (or the target user).
-- The **exact argv** pkexec will run, quoted so argument boundaries are visible, plus the working directory.
+- The **exact argv** pkexec will run, quoted so argument boundaries are visible, plus the working
+  directory. Long commands are shown numbered, one option per line, with nested commands indented.
 - **Warnings** (`!!` lines): the program or an argument can be modified by the requesting user, a
   relative program name, a shell or interpreter, or a script file whose contents aren't shown
   (`sh fix.sh`, `python3 x.py`, an executable script). The argument a warning is about is
   highlighted in the command. A flagged request gets a red border and the rule name in the header.
 - **from**: the process chain that asked.
+
+The header shows the uid change (`uid 1000 → 0`), or the rule name when something was flagged.
 
 You review it first. Deny is the filled button and Esc denies. Approve is disabled for 1s after the
 window appears, or 3s if anything was flagged.
@@ -61,6 +64,15 @@ colors:
 With `xresources: true`, `giopolkit.red` (and the other names) are used if set, then the
 terminal colors. `xresources_file: ~/.Xresources` reads a file instead of running `xrdb`.
 Config errors are printed and the remaining colors still apply.
+
+## Layout
+
+- `pkg/polkit/agent`: D-Bus agent and `polkit-agent-helper-1` conversation.
+- `pkg/polkit/pkexec`: reads the pkexec argv and requester chain, runs rules.
+- `pkg/rules`: the `Rule` interface and argv helpers. `pkg/rules/staticrules` has one file per
+  built-in rule (`raw-block-write`, `writable-program`, `writable-arg`, `interpreter`, ...).
+- `pkg/sys/{proc,fsperm,blockdev,xresources}`: OS readers with no polkit knowledge.
+- `pkg/ui`, `pkg/ui/theme`, `pkg/ui/place`: the Gio window. `pkg/config`: the config file.
 
 ## Security notes
 

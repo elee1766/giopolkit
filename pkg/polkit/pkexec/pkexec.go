@@ -3,6 +3,7 @@
 package pkexec
 
 import (
+	osuser "os/user"
 	"strconv"
 
 	"github.com/elee1766/giopolkit/pkg/rules"
@@ -15,6 +16,7 @@ type Report struct {
 	Program    string          // program pkexec will run, if this is a pkexec request
 	Argv       []string        // exact argv pkexec will run
 	TargetUser string          // pkexec --user, default root
+	TargetUID  int             // uid of TargetUser, -1 if unknown
 	Cwd        string          // working directory of the command, best effort
 	Trusted    bool            // Argv was read from a setuid pkexec process, which the caller can't alter
 	Chain      []proc.Proc     // the requester and its parents, pkexec excluded
@@ -88,6 +90,10 @@ loop:
 		}
 	}
 	r.TargetUser = user
+	r.TargetUID = -1
+	if u, err := osuser.Lookup(user); err == nil {
+		r.TargetUID, _ = strconv.Atoi(u.Uid)
+	}
 	r.Trusted = true
 	if i >= len(args) {
 		r.Argv = []string{"(login shell of " + user + ")"}

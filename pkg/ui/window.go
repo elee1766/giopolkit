@@ -276,9 +276,13 @@ func (v *view_) layout(gtx layout.Context) layout.Dimensions {
 
 func (v *view_) header(gtx layout.Context) layout.Dimensions {
 	rep := v.s.report
-	left, right := "polkit", v.s.req.ActionID
-	if len(rep.Argv) > 0 {
-		left, right = "polkit · pkexec", ""
+	left, right := "polkit", Escape(v.s.req.ActionID)
+	if len(rep.Argv) > 0 && len(rep.Chain) > 0 {
+		to := "?"
+		if rep.TargetUID >= 0 {
+			to = strconv.Itoa(rep.TargetUID)
+		}
+		right = fmt.Sprintf("uid %d → %s", rep.Chain[0].UID, to)
 	}
 	c := v.pal.Dim
 	if v.flagged() {
@@ -300,7 +304,7 @@ func (v *view_) header(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(v.text(left, c, false)),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				l := v.label(Escape(right), c, false)
+				l := v.label(right, c, false)
 				l.Alignment = text.End
 				l.MaxLines = 1
 				return layout.Inset{Left: 16}.Layout(gtx, l.Layout)
@@ -422,46 +426,156 @@ func (v *view_) title(s string, c color.NRGBA) layout.Widget {
 	}
 }
 
-// argv lays out the quoted arguments inline, wrapping between arguments, with flagged ones drawn
-// in inverse red.
+// cmdLine is one logical line of a command: the argv indices on it and its indent in characters.
+type cmdLine struct {
+	indent int
+	args   []int
+}
+
+// splitCommand breaks argv into lines the way a person would write it with backslashes: options
+// each start a line, an option without "=" keeps the value after it, and a positional argument
+// after a self-contained option starts a nested command, indented one level deeper.
+func splitCommand(argv []string) []cmdLine {
+	if len(argv) == 0 {
+		return nil
+	}
+	lines := []cmdLine{{indent: 0, args: []int{0}}}
+	level := 0
+	takesValue := false // last arg was an option that may take the next arg as its value
+	for i := 1; i < len(argv); i++ {
+		a := argv[i]
+		cur := &lines[len(lines)-1]
+		isOpt := strings.HasPrefix(a, "-") && a != "-"
+		switch {
+		case isOpt && len(lines) == 1 && len(cur.args) == 1:
+			cur.args = append(cur.args, i) // first option stays with the program
+		case isOpt:
+			lines = append(lines, cmdLine{indent: 2*level + 2, args: []int{i}})
+		case takesValue || !strings.HasPrefix(argv[cur.args[len(cur.args)-1]], "-"):
+			cur.args = append(cur.args, i)
+		default:
+			level++
+			lines = append(lines, cmdLine{indent: 2 * level, args: []int{i}})
+		}
+		takesValue = isOpt && !strings.Contains(a, "=")
+		if !isOpt {
+			takesValue = false
+		}
+	}
+	return lines
+}
+
+type argTok struct {
+	text string
+	hl   bool
+}
+
+// argv lays out the command. Short commands flow on wrapped lines. Commands that don't fit and
+// split into several logical lines are shown numbered, one option per line. Flagged arguments are
+// drawn in inverse red.
 func (v *view_) argv(argv []string, hl map[int]bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		maxW := gtx.Constraints.Max.X
 		lc := gtx
 		lc.Constraints.Min = image.Point{}
-		space := func() int {
+		measure := func(s string) image.Point {
 			m := op.Record(gtx.Ops)
-			d := v.text("x", v.pal.Fg, true)(lc)
+			d := v.text(s, v.pal.Fg, true)(lc)
 			m.Stop()
-			return d.Size.X
-		}()
-		x, y, lineH, width := 0, 0, 0, 0
-		for i, a := range argv {
-			c := v.pal.Fg
-			if hl[i] {
-				c = v.pal.Bg
+			return d.Size
+		}
+		ch := measure("x").X
+		tok := func(i int) argTok { return argTok{text: Quote(argv[i]), hl: hl[i]} }
+
+		lines := splitCommand(argv)
+		all := make([]argTok, len(argv))
+		for i := range argv {
+			all[i] = tok(i)
+		}
+		if len(lines) < 2 || v.flowWidth(gtx, all, ch) <= maxW {
+			h, w := v.flow(gtx, all, 0, 0, 0, maxW, ch)
+			return layout.Dimensions{Size: image.Pt(w, h)}
+		}
+
+		// Numbered layout: a line-number gutter with a rule on its left, as in an editor.
+		numW, gap := gtx.Dp(20), gtx.Dp(10)
+		textX := numW + gap
+		y, width := 0, 0
+		for n, ln := range lines {
+			toks := make([]argTok, 0, len(ln.args)+1)
+			for _, i := range ln.args {
+				toks = append(toks, tok(i))
 			}
+			if n < len(lines)-1 {
+				toks = append(toks, argTok{text: "\\"})
+			}
+			num := strconv.Itoa(n + 1)
 			m := op.Record(gtx.Ops)
-			d := v.text(Quote(a), c, true)(lc)
+			nd := v.text(num, v.pal.Dim, false)(lc)
 			call := m.Stop()
-			if x > 0 && x+space+d.Size.X > maxW {
-				y += lineH
-				x, lineH = 0, 0
-			} else if x > 0 {
-				x += space
-			}
-			t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-			if hl[i] {
-				paint.FillShape(gtx.Ops, v.pal.Red, clip.Rect{Max: d.Size}.Op())
-			}
+			t := op.Offset(image.Pt(numW-nd.Size.X, y)).Push(gtx.Ops)
 			call.Add(gtx.Ops)
 			t.Pop()
-			x += d.Size.X
-			lineH = max(lineH, d.Size.Y)
-			width = max(width, x)
+			h, w := v.flow(gtx, toks, textX, y, ln.indent*ch, maxW-textX, ch)
+			y += h
+			width = max(width, textX+w)
 		}
-		return layout.Dimensions{Size: image.Pt(width, y+lineH)}
+		rule := gtx.Dp(11)
+		paint.FillShape(gtx.Ops, v.pal.Line, clip.Rect{Min: image.Pt(-rule, 0), Max: image.Pt(-rule+gtx.Dp(1), y)}.Op())
+		return layout.Dimensions{Size: image.Pt(width, y)}
 	}
+}
+
+func (v *view_) flowWidth(gtx layout.Context, toks []argTok, ch int) int {
+	w := 0
+	for i, t := range toks {
+		if i > 0 {
+			w += ch
+		}
+		w += ch * len([]rune(t.text))
+	}
+	return w
+}
+
+// flow draws tokens separated by spaces starting at (x0+indent, y0), wrapping at maxW. Wrapped
+// lines are indented two characters past indent. Tokens wider than a line are broken anywhere.
+// It returns the height used and the widest line.
+func (v *view_) flow(gtx layout.Context, toks []argTok, x0, y0, indent, maxW, ch int) (int, int) {
+	lc := gtx
+	lc.Constraints.Min = image.Point{}
+	lc.Constraints.Max.X = max(maxW-indent, ch*8)
+	x, y, lineH, width := indent, 0, 0, 0
+	for i, t := range toks {
+		fg := v.pal.Fg
+		if t.hl {
+			fg = v.pal.Bg
+		}
+		lw := lc
+		if x > indent {
+			lw.Constraints.Max.X = max(maxW-indent-2*ch, ch*8)
+		}
+		m := op.Record(gtx.Ops)
+		d := v.label(t.text, fg, true).Layout(lw)
+		call := m.Stop()
+		if i > 0 {
+			if x+ch+d.Size.X > maxW {
+				y += lineH
+				x, lineH = indent+2*ch, 0
+			} else {
+				x += ch
+			}
+		}
+		tr := op.Offset(image.Pt(x0+x, y0+y+gtx.Dp(2))).Push(gtx.Ops)
+		if t.hl {
+			paint.FillShape(gtx.Ops, v.pal.Red, clip.Rect{Max: d.Size}.Op())
+		}
+		call.Add(gtx.Ops)
+		tr.Pop()
+		x += d.Size.X
+		lineH = max(lineH, d.Size.Y+gtx.Dp(4))
+		width = max(width, x)
+	}
+	return y + lineH, width
 }
 
 func (v *view_) footer(gtx layout.Context) layout.Dimensions {
@@ -545,7 +659,7 @@ func (v *view_) authPrompt(gtx layout.Context) layout.Dimensions {
 func (v *view_) buttons(denyLbl, okLbl, okHint string, okEnabled, danger bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		h := gtx.Dp(44)
-		btn := func(c *widget.Clickable, fill, edge, fg color.NRGBA, dashed bool, lbl, hint string, hintBold bool) layout.Widget {
+		btn := func(c *widget.Clickable, fill, edge, fg, hintFg color.NRGBA, dashed bool, lbl, hint string, hintBold bool) layout.Widget {
 			return func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, h)
 				gtx.Constraints.Max.Y = h
@@ -564,7 +678,7 @@ func (v *view_) buttons(denyLbl, okLbl, okHint string, okEnabled, danger bool) l
 							gtx.Constraints.Min.X = gtx.Constraints.Max.X
 							return layout.Flex{Spacing: layout.SpaceBetween, Alignment: layout.Middle}.Layout(gtx,
 								layout.Rigid(v.text(lbl, fg, true)),
-								layout.Rigid(v.text(hint, fg, hintBold)),
+								layout.Rigid(v.text(hint, hintFg, hintBold)),
 							)
 						})
 					})
@@ -572,24 +686,24 @@ func (v *view_) buttons(denyLbl, okLbl, okHint string, okEnabled, danger bool) l
 				})
 			}
 		}
-		okEdge, okFg := v.pal.Fg, v.pal.Fg
-		if danger {
-			okEdge, okFg = v.pal.Red, v.pal.Red
-		}
-		if !okEnabled {
-			okFg = v.pal.Dim
-			if !danger {
-				okEdge = v.pal.Dim
-			}
+		// Approve: green on a quiet border, red when flagged, dim with a dashed border while disabled.
+		okEdge, okFg, hintFg, hintBold := v.pal.Line, v.pal.Green, v.pal.Dim, false
+		switch {
+		case danger && okEnabled:
+			okEdge, okFg, hintFg, hintBold = v.pal.Red, v.pal.Red, v.pal.Red, true
+		case danger:
+			okEdge, okFg, hintFg = v.pal.Red, v.pal.Dim, v.pal.Dim
+		case !okEnabled:
+			okEdge, okFg, hintFg = v.pal.Dim, v.pal.Dim, v.pal.Dim
 		}
 		return layout.Flex{}.Layout(gtx,
-			layout.Flexed(1, btn(v.deny, v.pal.Fg, v.pal.Fg, v.pal.Bg, false, denyLbl, "esc", true)),
+			layout.Flexed(1, btn(v.deny, v.pal.Fg, v.pal.Fg, v.pal.Bg, v.pal.Bg, false, denyLbl, "esc", true)),
 			layout.Rigid(layout.Spacer{Width: 12}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				if !okEnabled {
 					gtx = gtx.Disabled()
 				}
-				return btn(v.approve, color.NRGBA{}, okEdge, okFg, !okEnabled, okLbl, okHint, okEnabled)(gtx)
+				return btn(v.approve, color.NRGBA{}, okEdge, okFg, hintFg, !okEnabled, okLbl, okHint, hintBold)(gtx)
 			}),
 		)
 	}
