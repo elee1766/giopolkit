@@ -69,10 +69,43 @@ Config errors are printed and the remaining colors still apply.
 
 - `pkg/polkit/agent`: D-Bus agent and `polkit-agent-helper-1` conversation.
 - `pkg/polkit/pkexec`: reads the pkexec argv and requester chain, runs rules.
-- `pkg/rules`: the `Rule` interface and argv helpers. `pkg/rules/staticrules` has one file per
-  built-in rule (`raw-block-write`, `writable-program`, `writable-arg`, `interpreter`, ...).
+- `pkg/rules`: the `Rule` interface and argv helpers.
+  - `pkg/rules/cmdline`: finds every command that will run, through wrappers (`env`, `nice`,
+    `timeout`, `sudo`, `systemd-run`, ...) and inside `sh -c` scripts (parsed with mvdan.cc/sh).
+  - `pkg/rules/gtfobins`: generated table of what each program can do as root.
+  - `pkg/rules/staticrules/{disk,fs,system,exec,integrity}`: rule packs, one file per rule.
 - `pkg/sys/{proc,fsperm,blockdev,xresources}`: OS readers with no polkit knowledge.
 - `pkg/ui`, `pkg/ui/theme`, `pkg/ui/place`: the Gio window. `pkg/config`: the config file.
+- `tools/gengtfobins`: regenerates the GTFOBins table.
+
+## Rules
+
+| Pack | Rule | Flags |
+| --- | --- | --- |
+| disk | `raw-block-write` | `dd of=`, `mkfs`, `wipefs`, ... on a block device, and where it is mounted |
+| fs | `recursive-delete` | `rm -r` / `find -delete` of `/`, `/etc`, `/usr`, home directories, ... |
+| fs | `sensitive-write` | writes to sudoers, shadow, PAM, cron, systemd units, `authorized_keys`, ...; account changes |
+| fs | `setuid` | `chmod u+s` / `4755`, `install -m 4755`, `setcap` |
+| system | `security-off` | stopping firewalld/ufw/auditd/apparmor, `setenforce 0`, flushing iptables |
+| system | `log-tamper` | emptying or deleting `/var/log`, history, `journalctl --vacuum-*` |
+| system | `kernel-module` | `insmod`, `modprobe`, `kexec` |
+| exec | `shell-escape` | shells and interpreters, programs with an interactive shell escape (vi, less), options that run code (`find -exec`, `tar --checkpoint-action`), and pagers (`systemctl status` without `--no-pager`) |
+| exec | `pipe-to-shell` | `curl ... \| sh` |
+| exec | `dynamic-script` | `sh -c` scripts with `$VAR` or `$(...)`, whose commands depend on values not shown |
+| exec | `env-hijack` | `LD_PRELOAD`, `PAGER`, `EDITOR`, `PYTHONPATH`, ... set inside the command |
+| exec | `script-file`, `script-program` | running a script file whose contents aren't shown |
+| integrity | `relative-program`, `writable-program`, `writable-arg` | the requester could change what runs after you approve |
+
+Rules check every command found by `pkg/rules/cmdline`, so `nice find / -exec sh` and
+`sh -c 'echo x >> /etc/sudoers'` are caught. Sources the patterns come from:
+
+- [GTFOBins](https://gtfobins.github.io) (GPL-3.0): which programs can run commands as root and
+  how. The table in `pkg/rules/gtfobins/table.go` is generated from a checkout:
+  `GTFOBINS=/path/to/GTFOBins.github.io go generate ./pkg/rules/gtfobins`.
+- [Destructive Command Guard](https://github.com/Dicklesworthstone/destructive_command_guard):
+  recursive deletes, `dd`/`mkfs` targets, command normalization.
+- [SigmaHQ](https://github.com/SigmaHQ/sigma) Linux `process_creation` rules: turning off security
+  services, log removal, setuid, persistence locations.
 
 ## Security notes
 

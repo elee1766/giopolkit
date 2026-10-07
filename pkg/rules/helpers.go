@@ -60,11 +60,24 @@ func IsScript(path string) bool {
 	return n == 2 && string(head) == "#!"
 }
 
-// IsInterpreter reports whether a program base name runs code taken from its arguments.
+// IsInterpreter reports whether a program runs code given as a file or an argument: shells and
+// language interpreters. Programs that run commands in other ways are covered by GTFOBins data.
 func IsInterpreter(base string) bool {
-	switch base {
-	case "sh", "bash", "dash", "zsh", "fish", "env", "perl", "ruby", "node", "deno", "bun", "lua", "php", "xargs", "find", "busybox", "nsenter", "systemd-run", "su", "sudo", "doas", "pkexec", "make", "awk", "gawk", "tclsh":
+	switch CanonicalName(base) {
+	case "sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "busybox",
+		"perl", "python", "ruby", "node", "deno", "bun", "lua", "php", "tclsh", "wish", "Rscript", "julia", "osascript":
 		return true
 	}
-	return strings.HasPrefix(base, "python")
+	return false
+}
+
+// CanonicalName strips version suffixes so python3.12, perl5.38, and lua5.4 match their
+// unversioned names.
+func CanonicalName(base string) string {
+	for _, p := range []string{"python", "perl", "ruby", "lua", "php", "pip", "node", "tclsh"} {
+		if rest, ok := strings.CutPrefix(base, p); ok && strings.Trim(rest, "0123456789.") == "" {
+			return p
+		}
+	}
+	return base
 }

@@ -1,4 +1,4 @@
-package staticrules
+package integrity
 
 import (
 	"path/filepath"
