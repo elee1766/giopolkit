@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -48,6 +49,13 @@ func helperPath() (string, error) {
 // runHelper runs polkit-agent-helper-1 for one identity. The helper runs PAM as root and, on
 // success, tells polkitd itself. The agent only relays the conversation.
 func runHelper(ctx context.Context, id Identity, cookie string, conv Conversation) error {
+	// polkit >= 124 ships a socket-activated helper and may drop the setuid bit. Prefer the
+	// socket when present, like libpolkit-agent does.
+	if _, err := os.Stat(helperSocket); err == nil {
+		if conn, err := net.Dial("unix", helperSocket); err == nil {
+			return runSocketHelper(ctx, conn, id, cookie, conv)
+		}
+	}
 	path, err := helperPath()
 	if err != nil {
 		return err
@@ -111,6 +119,54 @@ func runHelper(ctx context.Context, id Identity, cookie string, conv Conversatio
 		return ctx.Err()
 	}
 	return ErrAuthFailed
+}
+
+const helperSocket = "/run/polkit/agent-helper.socket"
+
+// runSocketHelper talks to the socket-activated polkit-agent-helper-1. The protocol matches the
+// pipe one, except the user name is sent first on the socket instead of argv.
+func runSocketHelper(ctx context.Context, conn net.Conn, id Identity, cookie string, conv Conversation) error {
+	var once sync.Once
+	close := func() { once.Do(func() { conn.Close() }) }
+	stop := context.AfterFunc(ctx, close)
+	defer stop()
+	defer close()
+
+	if _, err := io.WriteString(conn, id.Name+"\n"+cookie+"\n"); err != nil {
+		return err
+	}
+	rd := bufio.NewReader(conn)
+	for {
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return ErrAuthFailed
+		}
+		line = unescape(strings.TrimSuffix(line, "\n"))
+		kind, text, ok := parseLine(line)
+		switch {
+		case line == "SUCCESS" || strings.HasPrefix(line, "SUCCESS "):
+			return nil
+		case line == "FAILURE" || strings.HasPrefix(line, "FAILURE "):
+			return ErrAuthFailed
+		case !ok:
+			continue
+		}
+		ans, err := conv(ctx, kind, text)
+		if err != nil {
+			return err
+		}
+		if kind == PromptSecret || kind == PromptText {
+			if strings.ContainsAny(ans, "\n\x00") {
+				return errors.New("answer contains a newline or NUL")
+			}
+			if _, err := io.WriteString(conn, ans+"\n"); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func parseLine(line string) (PromptKind, string, bool) {
